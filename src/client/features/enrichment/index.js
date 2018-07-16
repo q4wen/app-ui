@@ -1,17 +1,19 @@
 const React = require('react');
 const h = require('react-hyperscript');
 const _ = require('lodash');
-//const Loader = require('react-loader');
+const Loader = require('react-loader');
 //const queryString = require('query-string');
 
 // const hideTooltips = require('../../common/cy/events/click').hideTooltips;
 // const removeStyle= require('../../common/cy/manage-style').removeStyle;
 const CytoscapeService = require('../../common/cy/');
-// const interactionsStylesheet= require('../../common/cy/interactions-stylesheet');
+const enrichmentStylesheet= require('../../common/cy/enrichment-stylesheet');
 const TokenInput = require('./token-input');
 const { BaseNetworkView } = require('../../common/components');
 const { getLayoutConfig } = require('../../common/cy/layout');
-//const downloadTypes = require('../../common/config').downloadTypes;
+const { ServerAPI } = require('../../services/');
+
+const downloadTypes = require('../../common/config').downloadTypes;
 
 const enrichmentConfig={
   //extablish toolbar and declare features to not include
@@ -22,39 +24,33 @@ const enrichmentConfig={
 };
 
 //temporary empty network for development purposes
-const emptyNetwork = {
-  graph: {
+const emptyNetworkJSON = {
     edges: [],
-    nodes: [],
-    pathwayMetadata: {
-      title: [],
-      datasource: [],
-      comments: []
-    },
-    layout: null
-  }
+    nodes: []
 };
-const network = emptyNetwork;
-const layoutConfig = getLayoutConfig();
+
 
 class Enrichment extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
-      cySrv: new CytoscapeService(),
+      cySrv: new CytoscapeService( {style: enrichmentStylesheet, showTooltipsOnEdges:true, minZoom:0.01 }),
       componentConfig: enrichmentConfig,
-      layoutConfig: layoutConfig,
-      networkJSON: network.graph,
-      networkMetadata: network.graph.pathwayMetadata,
+      layoutConfig: getLayoutConfig(),
+      networkJSON: emptyNetworkJSON,
 
-      //temporarily set to false so loading spinner is disabled
-      networkLoading: false,
+      networkMetadata: {
+        name: "enrichment",
+        datasource: [],
+        comments: []
+      },
+
+      loaded: true,
 
       closeToolBar: true,
-      //all submitted tokens, includes valid and invalid tokens
-      genes: [],
       unrecognized: [],
-      inputs: ""
+      inputs: "",
+      timedOut: false
     };
 
     this.handleInputs = this.handleInputs.bind(this);
@@ -63,7 +59,7 @@ class Enrichment extends React.Component {
   }
 
   handleInputs( inputs ) {
-    this.setState({ inputs });
+    this.setState({ inputs, loaded: true });
   }
 
   handleUnrecognized( unrecognized ) {
@@ -71,12 +67,36 @@ class Enrichment extends React.Component {
   }
 
   handleGenes( genes ) {
-    this.setState( { genes } );
-    // console.log(genes);
+    const updateNetworkJSON = async () => {
+      const analysisResult = await ServerAPI.enrichmentAPI({ genes: genes }, "analysis");
+
+      if( !analysisResult || !analysisResult.pathwayInfo ) {
+        this.setState({ timedOut: true, loaded: true });
+        return;
+      }
+
+      const visualizationResult = await ServerAPI.enrichmentAPI({ pathways: analysisResult.pathwayInfo }, "visualization");
+
+      if( !visualizationResult ) {
+        this.setState({ timedOut: true, loaded: true });
+        return;
+      }
+
+      this.setState({
+        closeToolBar: false,
+        loaded: true,
+        networkJSON: {
+          edges: visualizationResult.graph.elements.edges,
+          nodes: visualizationResult.graph.elements.nodes
+        }
+      });
+    };
+    updateNetworkJSON();
   }
 
   render() {
-    let { cySrv, componentConfig, layoutConfig, networkJSON, networkMetadata, networkLoading } = this.state;
+    let { cySrv, componentConfig, layoutConfig, networkJSON, networkMetadata, networkLoading, closeToolBar, loaded } = this.state;
+
     let retrieveTokenInput = () => h(TokenInput,{
       inputs: this.state.inputs,
       handleInputs: this.handleInputs,
@@ -85,17 +105,32 @@ class Enrichment extends React.Component {
       handleGenes: this.handleGenes
     });
 
-    return h(BaseNetworkView.component, {
+    const baseView = !this.state.timedOut ?
+    h(BaseNetworkView.component, {
       cySrv,
       componentConfig,
       layoutConfig,
       networkJSON,
       networkMetadata,
       networkLoading,
+      closeToolBar,
       titleContainer: () => h(retrieveTokenInput),
-      //will use state to set to false to render the toolbar once analysis is run and graph is displayed
-      closeToolBar: true
-    });
+      download: {
+        types: downloadTypes.filter(ele=>ele.type==='png'||ele.type==='sif'),
+        promise: () => Promise.resolve(_.map(this.state.cy.edges(),edge=> edge.data().id).sort().join('\n'))
+      },
+    })
+    :
+    h('div.no-network',[
+      h('strong.title','Network currently unavailable'),
+      h('a', { href: location.href },'Try a diffrent set of genes')
+    ]);
+
+    const loadingView = h(Loader, { loaded: loaded, options: { left: '50%', color: '#16A085' }});
+
+    //display baseView or loading spinner
+    const content = loaded ? baseView : loadingView;
+    return h('div.main', [content]);
   }
 }
 
