@@ -37,7 +37,11 @@ const IconButton = require('./icon-button');
 class Sidebar extends React.Component {
   render(){
     let { controller, activeMenu, children } = this.props;
-    let activeMenuContent = children.find(child => child.key === activeMenu);
+
+    let activeMenuContent = children.map( (child, i) => {
+      const className = child.key === activeMenu ? 'show-menu' : 'hide-menu';
+      return h('div.' + className, {key: i}, [child]);
+    });
 
     return h('div.sidebar-menu', { className: classNames({'sidebar-menu-open': activeMenu != 'closeMenu' })}, [
       h('div.sidebar-close', [

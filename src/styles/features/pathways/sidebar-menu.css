@@ -78,6 +78,15 @@
   }
 }
 
+.show-menu {
+  height: 100%;
+  width: 100%;
+}
+
+.hide-menu {
+  display: none;
+}
+
 /* Mobile scaling */
 @media (--small-width-viewport) {
   .sidebar-text h2 {
